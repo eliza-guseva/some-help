@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	_ "embed"
 	"github.com/getlantern/systray"
 )
@@ -18,6 +19,21 @@ func main() {
 func onReady() {
 	systray.SetTooltip("SomeHelp Assistant")
 	systray.SetIcon(iconData)
+	mRecord := systray.AddMenuItem("🎙️ Record your question", "Record your question")
+
+	mQuit := systray.AddMenuItem("❌ Quit the assistant", "Quit the assistant")
+
+	go func() {
+		for {
+			select {
+			case <-mRecord.ClickedCh:
+				fmt.Println("Make belief recording")
+			case <-mQuit.ClickedCh:
+				fmt.Println("Quitting the assistant")
+				systray.Quit()
+			}
+		}
+	}()
 }
 
 func onExit() {
