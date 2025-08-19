@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -41,7 +42,7 @@ func main() {
 	mainWindow := fyneApp.NewWindow("SomeHelp Assistant")
 	mainWindow.Resize(fyne.NewSize(MainWindowWidth, 120))
 	mainWindow.SetFixedSize(false)
-	setupMainWindow(mainWindow, stopChan)
+	setupMainWindow(mainWindow)
 	mainWindow.Hide()
 
 	//system tray and run
@@ -65,7 +66,7 @@ func setupSystemTray(mainWindow fyne.Window, stopChan chan struct{}) {
 	desk.SetSystemTrayIcon(fyne.NewStaticResource("icon", iconData))
 }
 
-func setupMainWindow(window fyne.Window, stopChan chan struct{}) {
+func setupMainWindow(window fyne.Window) {
 	topLabel := widget.NewLabel("SomeHelp? Assistant")
 	window.SetCloseIntercept(func() {
 		window.Hide()
@@ -75,13 +76,8 @@ func setupMainWindow(window fyne.Window, stopChan chan struct{}) {
 	scrollContainer := container.NewScroll(clipboardEntry)
 	scrollContainer.SetMinSize(fyne.NewSize(MainWindowWidth-20, 30))
 
-	stopButton := widget.NewButton("Stop", func() {
-		stopChan <- struct{}{}
-	})
-
 	content := container.NewVBox(
 		topLabel,
-		stopButton,
 		widget.NewSeparator(),
 		scrollContainer,
 	)
@@ -100,6 +96,7 @@ func showRecordingWindow(mainWindow fyne.Window, stopChan chan struct{}) {
 	height := GapHeight + float32(lines*22)
 	statusLabel := widget.NewLabel("🎙️ Recording...")
 	recording := make([]int16, 0)
+	transcribed := ""
 	go listen(stopChan, &recording)
 
 	clipboardContent := widget.NewEntry()
@@ -113,7 +110,9 @@ func showRecordingWindow(mainWindow fyne.Window, stopChan chan struct{}) {
 	stopButton := widget.NewButton("⏹️ Stop Recording", func() {
 		stopChan <- struct{}{}
 		statusLabel.SetText("✅ Recording stopped")
-		saveToWAV(recording, "recording.wav")
+		transcribed = transcribe(recording)
+		slog.Info("Transcribed", "transcribed", transcribed)
+		clipboard.WriteAll(transcribed + "\n" + "CONTEXT: " + clipboardEntry.Text)
 	})
 
 	content := container.NewVBox(
@@ -153,7 +152,7 @@ func listen(stopChan chan struct{}, recording *[]int16) error {
 			Channels: 1,
 			Latency:  inputDevice.DefaultLowInputLatency,
 		},
-		SampleRate:      44100,
+		SampleRate:      16000,
 		FramesPerBuffer: 1024,
 	}
 	buffer := make([]int16, 1024)
@@ -186,27 +185,41 @@ func listen(stopChan chan struct{}, recording *[]int16) error {
 	}
 }
 
-func saveToWAV(data []int16, filename string) error {
-	convertedData := make([]int, len(data))
-	for i, v := range data {
-		convertedData[i] = int(v)
+func transcribe(data []int16) string {
+	saveToWAV(data)
+	defer os.Remove("recording.wav")
+
+	cmd := exec.Command("whisper-cli", "recording.wav", "-np")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.Error("Error transcribing", "error", err, "output", string(output))
+		return ""
 	}
-	file, err := os.Create(filename)
+	return strings.TrimSpace(string(output))
+}
+
+func saveToWAV(data []int16) error {
+	intData := make([]int, len(data))
+	for i, v := range data {
+		intData[i] = int(v)
+	}
+
+	file, err := os.Create("recording.wav")
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	encoder := wav.NewEncoder(file, 44100, 16, 1, 1)
+	encoder := wav.NewEncoder(file, 16000, 16, 1, 1)
 	if err != nil {
 		return err
 	}
 	defer encoder.Close()
 
 	buffer := audio.IntBuffer{
-		Data: convertedData,
+		Data: intData,
 		Format: &audio.Format{
-			SampleRate:  44100,
+			SampleRate:  16000,
 			NumChannels: 1,
 		},
 	}
