@@ -17,6 +17,7 @@ import (
 	"github.com/go-audio/audio"
 	"github.com/go-audio/wav"
 	"github.com/gordonklaus/portaudio"
+	"github.com/eliza-guseva/some-help/internal"
 )
 
 //go:embed icon.png
@@ -113,6 +114,8 @@ func showRecordingWindow(mainWindow fyne.Window, stopChan chan struct{}) {
 		transcribed = transcribe(recording)
 		slog.Info("Transcribed", "transcribed", transcribed)
 		clipboard.WriteAll(transcribed + "\n" + "CONTEXT: " + clipboardEntry.Text)
+		internal.PasteToClaudeApp()
+		mainWindow.Hide()
 	})
 
 	content := container.NewVBox(
@@ -225,3 +228,5 @@ func saveToWAV(data []int16) error {
 	}
 	return encoder.Write(&buffer)
 }
+
+
