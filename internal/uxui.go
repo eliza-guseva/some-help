@@ -101,14 +101,17 @@ func ShowRecordingWindow(
 	scrollContainer.SetMinSize(fyne.NewSize(MainWindowWidth-20, height-GapHeight+25))
 	mainWindow.Resize(fyne.NewSize(500, height))
 
-	stopButton := widget.NewButton("⏹️ Stop Recording", func() {
+	var stopButton *widget.Button
+	stopButton = widget.NewButton("⏹️ Stop Recording", func() {
 		stopChan <- struct{}{}
-		statusLabel.SetText("✅ Recording stopped")
-		transcribed = Transcribe(recording)
-		slog.Info("Transcribed", "transcribed", transcribed)
-		clipboard.WriteAll(transcribed + "\n\n" + "CONTEXT:\n" + clipboardEntry.Text)
-		PasteToClaudeApp()
-		mainWindow.Hide()
+		go processRecordingAndSendToAI(
+			&recording, 
+			&transcribed,
+			clipboardEntry.Text, 
+			statusLabel, 
+			mainWindow, 
+			stopButton,
+		)
 	})
 
 	content := container.NewVBox(
@@ -133,15 +136,18 @@ func readClipboard() string {
 }
 
 func processRecordingAndSendToAI(
-	recording []int16,
+	recording *[]int16,
+	transcribed *string,
 	contetxText string,
 	statusLabel *widget.Label,
 	mainWindow fyne.Window,
+	stopButton *widget.Button,
 ) {
+	stopButton.Disable()
 	statusLabel.SetText("⏳ Transcribing...")
-	transcribed := Transcribe(recording)
+	*transcribed = Transcribe(*recording)
 	statusLabel.SetText("🤖 Sending to Claude...")
-	content := transcribed + "\n\n" + "CONTEXT:\n" + contetxText
+	content := *transcribed + "\n\n" + "CONTEXT:\n" + contetxText
 	clipboard.WriteAll(content)
 
 	err := PasteToClaudeApp()
@@ -151,5 +157,6 @@ func processRecordingAndSendToAI(
 	} else {
 		statusLabel.SetText("✅ Sent to Claude successfully!")
 	}
+	stopButton.Enable()
 	time.AfterFunc(100 * time.Millisecond, func() {mainWindow.Hide()})
 }
