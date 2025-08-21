@@ -143,20 +143,42 @@ func processRecordingAndSendToAI(
 	mainWindow fyne.Window,
 	stopButton *widget.Button,
 ) {
-	stopButton.Disable()
-	statusLabel.SetText("⏳ Transcribing...")
+	fyne.DoAndWait(func() {
+		stopButton.Disable()
+	})
+	
+	fyne.DoAndWait(func() {
+		statusLabel.SetText("⏳ Transcribing...")
+	})
+	
 	*transcribed = Transcribe(*recording)
-	statusLabel.SetText("🤖 Sending to Claude...")
+	
+	fyne.DoAndWait(func() {
+		statusLabel.SetText("🤖 Sending to Claude...")
+	})
+	
 	content := *transcribed + "\n\n" + "CONTEXT:\n" + contetxText
 	clipboard.WriteAll(content)
 
 	err := PasteToClaudeApp()
 	if err != nil {
 		slog.Error("Failed to paste to Claude", "error", err)
-		statusLabel.SetText("❌ Failed to send to Claude (copied to clipboard)")
+		fyne.DoAndWait(func() {
+			statusLabel.SetText("❌ Failed to send to Claude (copied to clipboard)")
+		})
 	} else {
-		statusLabel.SetText("✅ Sent to Claude successfully!")
+		fyne.DoAndWait(func() {
+			statusLabel.SetText("✅ Sent to Claude successfully!")
+		})
 	}
-	stopButton.Enable()
-	time.AfterFunc(100 * time.Millisecond, func() {mainWindow.Hide()})
+	
+	fyne.DoAndWait(func() {
+		stopButton.Enable()
+	})
+	
+	time.AfterFunc(100 * time.Millisecond, func() {
+		fyne.DoAndWait(func() {
+			mainWindow.Hide()
+		})
+	})
 }
