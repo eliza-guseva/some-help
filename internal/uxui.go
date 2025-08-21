@@ -3,6 +3,8 @@ package internal
 import (
 	"log/slog"
 	"strings"
+	"time"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
@@ -128,4 +130,26 @@ func readClipboard() string {
 		return ""
 	}
 	return text
+}
+
+func processRecordingAndSendToAI(
+	recording []int16,
+	contetxText string,
+	statusLabel *widget.Label,
+	mainWindow fyne.Window,
+) {
+	statusLabel.SetText("⏳ Transcribing...")
+	transcribed := Transcribe(recording)
+	statusLabel.SetText("🤖 Sending to Claude...")
+	content := transcribed + "\n\n" + "CONTEXT:\n" + contetxText
+	clipboard.WriteAll(content)
+
+	err := PasteToClaudeApp()
+	if err != nil {
+		slog.Error("Failed to paste to Claude", "error", err)
+		statusLabel.SetText("❌ Failed to send to Claude (copied to clipboard)")
+	} else {
+		statusLabel.SetText("✅ Sent to Claude successfully!")
+	}
+	time.AfterFunc(100 * time.Millisecond, func() {mainWindow.Hide()})
 }
