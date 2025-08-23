@@ -1,17 +1,18 @@
 package internal
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
-	"log/slog"
-	
+
 	"github.com/go-audio/audio"
 	"github.com/go-audio/wav"
 	"github.com/gordonklaus/portaudio"
 )
 
-func Listen(stopChan chan struct{}, recording *[]int16) error {
+func Listen(commandChan chan RecCommand, recording *[]int16, isListening *bool) error {
 	portaudio.Initialize()
 	defer portaudio.Terminate()
 
@@ -45,10 +46,20 @@ func Listen(stopChan chan struct{}, recording *[]int16) error {
 
 	for {
 		select {
-		case <-stopChan:
-			stream.Stop()
-			stream.Close()
-			return nil
+		case <-commandChan:
+			*isListening = false
+			err = stream.Stop()
+			if err != nil {
+				slog.Error("Error stopping stream", "error", err)
+			}
+			err = stream.Close()
+			if err != nil {
+				slog.Error("Error closing stream", "error", err)
+			}
+			err = saveToWAV(*recording)
+			if err != nil {
+				slog.Error("Error saving recording", "error", err)
+			}
 		default:
 			err = stream.Read()
 			if err != nil {
@@ -60,17 +71,33 @@ func Listen(stopChan chan struct{}, recording *[]int16) error {
 	}
 }
 
-func Transcribe(data []int16) string {
-	saveToWAV(data)
-	defer os.Remove("recording.wav")
-
-	cmd := exec.Command("whisper-cli", "recording.wav", "-np", "--no-timestamps")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		slog.Error("Error transcribing", "error", err, "output", string(output))
+func Transcribe(ctxPtr *context.Context) string {
+	select {
+	case <-(*ctxPtr).Done():
+		slog.Info("Killing whisper-cli")
+		cmd := exec.Command("kill", "-9", "whisper-cli")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			slog.Error("Error killing whisper-cli", "error", err, "output", string(output))
+		}
+		cmd.Run()
+		slog.Info("Killed whisper-cli")
 		return ""
+	default:
+		slog.Info("Transcribing")
+		cmd := exec.Command("whisper-cli", "recording.wav", "-np", "--no-timestamps")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			slog.Error("Error transcribing", "error", err, "output", string(output))
+			return ""
+		}
+		slog.Info("Transcribed")
+		err = os.Remove("recording.wav")
+		if err != nil {
+			slog.Error("Error removing recording.wav", "error", err)
+		}
+		return strings.TrimSpace(string(output))
 	}
-	return strings.TrimSpace(string(output))
 }
 
 func saveToWAV(data []int16) error {
@@ -86,7 +113,7 @@ func saveToWAV(data []int16) error {
 	defer file.Close()
 
 	encoder := wav.NewEncoder(file, 16000, 16, 1, 1)
-	
+
 	defer encoder.Close()
 
 	buffer := audio.IntBuffer{
@@ -98,5 +125,3 @@ func saveToWAV(data []int16) error {
 	}
 	return encoder.Write(&buffer)
 }
-
-

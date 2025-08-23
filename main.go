@@ -3,12 +3,12 @@ package main
 import (
 	_ "embed"
 	"fmt"
+
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/widget"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/widget"
 	"github.com/eliza-guseva/some-help/internal"
 )
-
 
 //go:embed icon.png
 var iconData []byte
@@ -20,19 +20,12 @@ func main() {
 	// general setup
 	fmt.Println("Hello, 世界")
 	fyneApp = app.New()
-
+	commandChan := make(chan internal.RecCommand)
 	clipboardEntry.MultiLine = true
 	clipboardEntry.Wrapping = fyne.TextWrapWord
-	clipboardEntry.SetText("!")	
+	clipboardEntry.SetText("!")
 
-	//audio
-	stopChan := make(chan struct{})
-
-	internal.CreateFyneApp(fyneApp, stopChan, iconData, clipboardEntry)
-	
+	internal.CreateFyneApp(commandChan, fyneApp, iconData, clipboardEntry)
 
 	fyneApp.Run()
 }
-
-
-
