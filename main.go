@@ -20,7 +20,7 @@ func main() {
 	// general setup
 	fmt.Println("Hello, 世界")
 	fyneApp = app.New()
-	commandChan := make(chan internal.RecCommand)
+	commandChan := make(chan struct{})
 	clipboardEntry.MultiLine = true
 	clipboardEntry.Wrapping = fyne.TextWrapWord
 	clipboardEntry.SetText("!")

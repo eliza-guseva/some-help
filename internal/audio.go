@@ -12,7 +12,7 @@ import (
 	"github.com/gordonklaus/portaudio"
 )
 
-func Listen(commandChan chan RecCommand, recording *[]int16, isListening *bool) error {
+func Listen(commandChan chan struct{}, recording *[]int16, isListening *bool) error {
 	portaudio.Initialize()
 	defer portaudio.Terminate()
 

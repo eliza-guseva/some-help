@@ -15,21 +15,16 @@ import (
 
 var MainWindowWidth float32 = 600
 var GapHeight float32 = 50
-var currentCommandChan chan RecCommand
 
-type CommandType int
+type StopButtonState int
 
 const (
-	Stop CommandType = iota
-	Kill
+	StopButtonStop StopButtonState = iota
+	StopButtonReRecord
 )
 
-type RecCommand struct {
-	Type CommandType
-}
-
 func CreateFyneApp(
-	commandChan chan RecCommand,
+	commandChan chan struct{},
 	fyneApp fyne.App,
 	iconData []byte,
 	clipboardEntry *widget.Entry,
@@ -48,7 +43,7 @@ func CreateFyneApp(
 }
 
 func setupSystemTray(
-	commandChan chan RecCommand,
+	commandChan chan struct{},
 	fyneApp fyne.App,
 	mainWindow fyne.Window,
 	iconData []byte,
@@ -86,7 +81,7 @@ func setupMainWindow(window fyne.Window, clipboardEntry *widget.Entry) {
 }
 
 func ShowRecordingWindow(
-	commandChan chan RecCommand,
+	commandChan chan struct{},
 	mainWindow fyne.Window,
 	clipboardEntry *widget.Entry,
 ) {
@@ -123,11 +118,12 @@ func ShowRecordingWindow(
 	scrollContainer.SetMinSize(fyne.NewSize(MainWindowWidth-20, height-GapHeight+25))
 	mainWindow.Resize(fyne.NewSize(500, height))
 
+	// transcribe and send button
 	var transcribeSendButton *widget.Button
 	transcribeSendButton = widget.NewButton("🤖 Transcribe and Send to AI", func() {
 		slog.Info("Transcribe and Send to AI Button, isListening", "isListening", isListening)
 		if isListening {
-			commandChan <- RecCommand{Type: Stop}
+			commandChan <- struct{}{}
 		}
 		go processRecordingAndSendToAI(
 			ctxPtr,
@@ -139,20 +135,28 @@ func ShowRecordingWindow(
 			transcribeSendButton,
 		)
 	})
+
+	// stop button
 	var stopButton *widget.Button
+	stopButtonState := StopButtonStop
 	stopButton = widget.NewButton("⏹️ Stop!", func() {
 		slog.Info("Stopping Button, isListening", "isListening", isListening)
-		if isListening {
-			commandChan <- RecCommand{Type: Stop}
-			isListening = false
+		if stopButtonState == StopButtonStop {
+			if isListening {
+				commandChan <- struct{}{}
+				isListening = false
+			}
+			cancel()
+			statusLabel.SetText("❌ Cancelled")
+			stopButton.SetText("🔄 Re-record")
+			stopButtonState = StopButtonReRecord
+			newCtx, NewCancel := context.WithCancel(context.Background())
+			*ctxPtr = newCtx
+			cancel = NewCancel
+			slog.Info("Stopped with context", "context", *ctxPtr)
+		} else {
+
 		}
-		cancel()
-		statusLabel.SetText("❌ Cancelled")
-		stopButton.SetText("🔄 Re-record")
-		newCtx, NewCancel := context.WithCancel(context.Background())
-		*ctxPtr = newCtx
-		cancel = NewCancel
-		slog.Info("Stopped with context", "context", *ctxPtr)
 	})
 
 	buttons := container.NewHBox(stopButton, transcribeSendButton)
