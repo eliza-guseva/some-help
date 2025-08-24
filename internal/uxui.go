@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -23,8 +24,39 @@ const (
 	StopButtonReRecord
 )
 
+type RecorderState struct {
+	recording atomic.Bool
+	stopChan atomic.Pointer[chan struct{}]
+}
+
+func (state *RecorderState) StartRecording() <-chan []int16 {
+	if state.recording.CompareAndSwap(false, true) {
+		stopChan := make(chan struct{})
+		resultChan := make(chan []int16, 1)
+		state.stopChan.Store(&stopChan)
+
+		go func() {
+			data, _ := Listen(stopChan)
+			resultChan <-data
+			state.recording.Store(false)
+		}()
+
+		return resultChan
+	}
+	return nil
+}
+
+func (state *RecorderState) StopRecording() {
+	if state.recording.CompareAndSwap(true, false) {
+		if stopChan := state.stopChan.Load(); stopChan != nil {
+			close(*stopChan)
+		}
+	}
+}
+
+
 func CreateFyneApp(
-	commandChan chan struct{},
+	recorderState *RecorderState,
 	fyneApp fyne.App,
 	iconData []byte,
 	clipboardEntry *widget.Entry,
@@ -39,11 +71,11 @@ func CreateFyneApp(
 	mainWindow.Hide()
 
 	//system tray and run
-	setupSystemTray(commandChan, fyneApp, mainWindow, iconData, clipboardEntry)
+	setupSystemTray(recorderState, fyneApp, mainWindow, iconData, clipboardEntry)
 }
 
 func setupSystemTray(
-	commandChan chan struct{},
+	recorderState *RecorderState,
 	fyneApp fyne.App,
 	mainWindow fyne.Window,
 	iconData []byte,
@@ -53,7 +85,7 @@ func setupSystemTray(
 	slog.Info("Setting up system tray")
 	menu := fyne.NewMenu("SomeHelp?",
 		fyne.NewMenuItem("Record your question", func() {
-			ShowRecordingWindow(commandChan, mainWindow, clipboardEntry)
+			ShowRecordingWindow(recorderState, mainWindow, clipboardEntry)
 		}),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Close record window", func() {
@@ -81,7 +113,7 @@ func setupMainWindow(window fyne.Window, clipboardEntry *widget.Entry) {
 }
 
 func ShowRecordingWindow(
-	commandChan chan struct{},
+	recorderState *RecorderState,
 	mainWindow fyne.Window,
 	clipboardEntry *widget.Entry,
 ) {
@@ -96,20 +128,17 @@ func ShowRecordingWindow(
 	}
 	height := GapHeight + float32(lines*22)
 	statusLabel := widget.NewLabel("🎙️ Recording...")
-	recording := make([]int16, 0)
-	transcribed := ""
 
 	// context
 	var ctxPtr *context.Context
 	var cancel context.CancelFunc
 	initialCtx, cancel := context.WithCancel(context.Background())
-
 	ctxPtr = &initialCtx
 
-	isListening := true
-	slog.Info("Starting Listen, isListening", "isListening", isListening)
-	go Listen(commandChan, &recording, &isListening)
+	// start recording
+	resultChan := recorderState.StartRecording()
 
+	// clipboard content
 	clipboardContent := widget.NewEntry()
 	clipboardContent.MultiLine = true
 	clipboardContent.Wrapping = fyne.TextWrapWord
@@ -121,13 +150,11 @@ func ShowRecordingWindow(
 	// transcribe and send button
 	var transcribeSendButton *widget.Button
 	transcribeSendButton = widget.NewButton("🤖 Transcribe and Send to AI", func() {
-		slog.Info("Transcribe and Send to AI Button, isListening", "isListening", isListening)
-		if isListening {
-			commandChan <- struct{}{}
-		}
+		recorderState.StopRecording()
+		transcribed := ""
 		go processRecordingAndSendToAI(
 			ctxPtr,
-			&recording,
+			resultChan,
 			&transcribed,
 			clipboardEntry.Text,
 			statusLabel,
@@ -140,12 +167,8 @@ func ShowRecordingWindow(
 	var stopButton *widget.Button
 	stopButtonState := StopButtonStop
 	stopButton = widget.NewButton("⏹️ Stop!", func() {
-		slog.Info("Stopping Button, isListening", "isListening", isListening)
 		if stopButtonState == StopButtonStop {
-			if isListening {
-				commandChan <- struct{}{}
-				isListening = false
-			}
+			recorderState.StopRecording()
 			cancel()
 			statusLabel.SetText("❌ Cancelled")
 			stopButton.SetText("🔄 Re-record")
@@ -155,7 +178,7 @@ func ShowRecordingWindow(
 			cancel = NewCancel
 			slog.Info("Stopped with context", "context", *ctxPtr)
 		} else {
-
+			slog.Info("TBD")
 		}
 	})
 
@@ -184,7 +207,7 @@ func readClipboard() string {
 
 func processRecordingAndSendToAI(
 	ctxPtr *context.Context,
-	recording *[]int16,
+	resultChan <-chan []int16,
 	transcribed *string,
 	contetxText string,
 	statusLabel *widget.Label,
@@ -204,7 +227,10 @@ func processRecordingAndSendToAI(
 		transcribeSendButton.Disable()
 	})
 
-	result, ok := transcribeWithCancellation(ctxPtr, recording, statusLabel)
+	recording := <-resultChan
+	saveToWAV(recording)
+
+	result, ok := transcribeWithCancellation(ctxPtr, statusLabel)
 
 	if !ok {
 		return
@@ -239,7 +265,6 @@ func processRecordingAndSendToAI(
 
 func transcribeWithCancellation(
 	ctxPtr *context.Context,
-	recording *[]int16,
 	statusLabel *widget.Label,
 ) (string, bool) {
 	updateStatus(statusLabel, "⏳ Transcribing...")

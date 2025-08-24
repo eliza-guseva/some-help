@@ -12,14 +12,18 @@ import (
 	"github.com/gordonklaus/portaudio"
 )
 
-func Listen(commandChan chan struct{}, recording *[]int16, isListening *bool) error {
+
+
+
+func Listen(stopChan <-chan struct{}) ([]int16, error) {
 	portaudio.Initialize()
 	defer portaudio.Terminate()
+	recording := make([]int16, 0)
 
 	inputDevice, err := portaudio.DefaultInputDevice()
 	if err != nil {
 		slog.Error("Error getting default input device", "error", err)
-		return err
+		return nil, err
 	}
 
 	inputParams := portaudio.StreamParameters{
@@ -35,20 +39,19 @@ func Listen(commandChan chan struct{}, recording *[]int16, isListening *bool) er
 	stream, err := portaudio.OpenStream(inputParams, buffer)
 	if err != nil {
 		slog.Error("Error opening stream", "error", err)
-		return err
+		return nil, err
 	}
 
 	err = stream.Start()
 	if err != nil {
 		slog.Error("Error starting stream", "error", err)
-		return err
+		return nil, err
 	}
 
 	for {
 		select {
-		case <-commandChan:
-			*isListening = false
-			err = stream.Stop()
+		case <-stopChan:
+			err := stream.Stop()
 			if err != nil {
 				slog.Error("Error stopping stream", "error", err)
 			}
@@ -56,20 +59,18 @@ func Listen(commandChan chan struct{}, recording *[]int16, isListening *bool) er
 			if err != nil {
 				slog.Error("Error closing stream", "error", err)
 			}
-			err = saveToWAV(*recording)
-			if err != nil {
-				slog.Error("Error saving recording", "error", err)
-			}
+			return recording, nil
 		default:
 			err = stream.Read()
 			if err != nil {
 				slog.Error("Error reading stream", "error", err)
-				return err
+				return nil, err
 			}
-			*recording = append(*recording, buffer...)
+			recording = append(recording, buffer...)
 		}
 	}
 }
+
 
 func Transcribe(ctxPtr *context.Context) string {
 	select {
